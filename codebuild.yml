@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  CdkBuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: 'CdkBuildProject'
+      Source:
+        Type: 'CODEPIPELINE'
+      Artifacts:
+        Type: 'CODEPIPELINE'
+      Environment:
+        ComputeType: 'BUILD_GENERAL1_SMALL'
+        Image: 'aws/codebuild/standard:5.0'
+        Type: 'LINUX_CONTAINER'
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      BuildSpec: |
+        version: 0.2
+        phases:
+          install:
+            commands:
+              - npm install -g aws-cdk
+              - npm install
+          build:
+            commands:
+              - npx cdk synth
+        artifacts:
+          files:
+            - 'cdk.out/MyAthenaUserStack.template.json'
+
+  GlueScriptBuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: 'GlueScriptBuildProject'
+      Source:
+        Type: 'CODEPIPELINE'
+      Artifacts:
+        Type: 'CODEPIPELINE'
+      Environment:
+        ComputeType: 'BUILD_GENERAL1_SMALL'
+        Image: 'aws/codebuild/standard:5.0'
+        Type: 'LINUX_CONTAINER'
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      BuildSpec: |
+        version: 0.2
+        phases:
+          install:
+            commands:
+              - pip install awscli
+          build:
+            commands:
+              - aws s3 cp scripts/ s3://${GlueScriptsBucket} --recursive
+        artifacts:
+          files:
+            - '**/*'
+
+  CodeBuildServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'codebuild.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'CodeBuildPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                Resource: '*'

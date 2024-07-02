@@ -1,61 +1,98 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Resources:
-  MyPipeline:
-    Type: AWS::CodePipeline::Pipeline
+  PipelineArtifactBucket:
+    Type: 'AWS::S3::Bucket'
     Properties:
-      RoleArn: arn:aws:iam::123456789012:role/AWS-CodePipeline-Service-Role
+      RemovalPolicy: 'Destroy'
+
+  GlueScriptsBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      RemovalPolicy: 'Retain'
+
+  PipelineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'codepipeline.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'SecretsManagerAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'secretsmanager:GetSecretValue'
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:AWS_GITHUB_TOKEN-*'
+
+  MyCdkPipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      RoleArn: !GetAtt PipelineRole.Arn
       ArtifactStore:
-        Type: S3
-        Location: !Ref ArtifactBucket
+        Type: 'S3'
+        Location: !Ref PipelineArtifactBucket
       Stages:
-        - Name: Source
+        - Name: 'Source'
           Actions:
-            - Name: GitHubSource
+            - Name: 'GitHub_Source'
               ActionTypeId:
-                Category: Source
-                Owner: ThirdParty
-                Provider: GitHub
-                Version: 1
+                Category: 'Source'
+                Owner: 'ThirdParty'
+                Provider: 'GitHub'
+                Version: '1'
               OutputArtifacts:
-                - Name: SourceOutput
+                - Name: 'sourceOutput'
               Configuration:
-                Owner: matheusgonzalez91
-                Repo: my-cdk-pipeline
-                Branch: main
+                Owner: 'matheusgonzalez91'
+                Repo: 'my-cdk-pipeline'
+                Branch: 'main'
                 OAuthToken: !Ref GitHubToken
-        - Name: Build
+        - Name: 'Build'
           Actions:
-            - Name: CodeBuild
+            - Name: 'CDK_Build'
               ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: 1
+                Category: 'Build'
+                Owner: 'AWS'
+                Provider: 'CodeBuild'
+                Version: '1'
               InputArtifacts:
-                - Name: SourceOutput
+                - Name: 'sourceOutput'
               OutputArtifacts:
-                - Name: BuildOutput
+                - Name: 'cdkBuildOutput'
               Configuration:
-                ProjectName: !Ref CodeBuildProject
-
-  ArtifactBucket:
-    Type: AWS::S3::Bucket
-
-  CodeBuildProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: MyBuildProject
-      Source:
-        Type: CODEPIPELINE
-      Artifacts:
-        Type: CODEPIPELINE
-      Environment:
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:5.0
-        Type: LINUX_CONTAINER
-
+                ProjectName: !Ref CdkBuildProject
+            - Name: 'Glue_Script_Build'
+              ActionTypeId:
+                Category: 'Build'
+                Owner: 'AWS'
+                Provider: 'CodeBuild'
+                Version: '1'
+              InputArtifacts:
+                - Name: 'sourceOutput'
+              OutputArtifacts:
+                - Name: 'glueScriptOutput'
+              Configuration:
+                ProjectName: !Ref GlueScriptBuildProject
+        - Name: 'Deploy'
+          Actions:
+            - Name: 'CFN_Deploy'
+              ActionTypeId:
+                Category: 'Deploy'
+                Owner: 'AWS'
+                Provider: 'CloudFormation'
+                Version: '1'
+              InputArtifacts:
+                - Name: 'cdkBuildOutput'
+              Configuration:
+                StackName: 'MyAthenaUserStack'
+                TemplatePath: 'cdkBuildOutput::MyAthenaUserStack.template.json'
+                Capabilities: 'CAPABILITY_NAMED_IAM'
+Parameters:
   GitHubToken:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: AWS_GITHUB_TOKEN
-      Description: GitHub OAuth token
+    Type: 'AWS::SecretsManager::Secret'
+    Description: 'GitHub OAuth Token'
